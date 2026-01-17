@@ -40,7 +40,10 @@ export default function LunarMapCanvas({
   const [isDragging, setIsDragging] = useState(false);
   const [draggedOutpostId, setDraggedOutpostId] = useState<string | null>(null);
   const [dragOffset, setDragOffset] = useState<Position>({ x: 0, y: 0 });
-  const cellSize = 10;
+  const cellSize = 12; // 拡大して地形を見やすく
+
+  // 太陽の方向（月面の光源）
+  const sunAngle = Math.PI / 4; // 45度
 
   // 星空背景を一度だけ描画
   useEffect(() => {
@@ -58,18 +61,79 @@ export default function LunarMapCanvas({
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     // 星を描画
-    const starCount = 200;
+    const starCount = 300;
     for (let i = 0; i < starCount; i++) {
       const x = Math.random() * canvas.width;
       const y = Math.random() * canvas.height;
       const brightness = Math.random();
-      const size = Math.random() * 1.5;
+      const size = Math.random() * 2;
 
       ctx.fillStyle = `rgba(255, 255, 255, ${brightness})`;
       ctx.beginPath();
       ctx.arc(x, y, size, 0, Math.PI * 2);
       ctx.fill();
     }
+
+    // 太陽を描画（左上）
+    const sunX = canvas.width * 0.15;
+    const sunY = canvas.height * 0.15;
+    const sunRadius = 30;
+
+    // 太陽のグロー
+    const sunGradient = ctx.createRadialGradient(sunX, sunY, 0, sunX, sunY, sunRadius * 2);
+    sunGradient.addColorStop(0, 'rgba(255, 255, 200, 1)');
+    sunGradient.addColorStop(0.3, 'rgba(255, 255, 150, 0.8)');
+    sunGradient.addColorStop(0.6, 'rgba(255, 200, 100, 0.3)');
+    sunGradient.addColorStop(1, 'rgba(255, 200, 100, 0)');
+
+    ctx.fillStyle = sunGradient;
+    ctx.beginPath();
+    ctx.arc(sunX, sunY, sunRadius * 2, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 太陽本体
+    ctx.fillStyle = '#FFFFCC';
+    ctx.beginPath();
+    ctx.arc(sunX, sunY, sunRadius, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 地球を描画（右上、小さく）
+    const earthX = canvas.width * 0.85;
+    const earthY = canvas.height * 0.12;
+    const earthRadius = 20;
+
+    // 地球のグロー
+    const earthGradient = ctx.createRadialGradient(earthX, earthY, 0, earthX, earthY, earthRadius * 1.5);
+    earthGradient.addColorStop(0, 'rgba(100, 150, 255, 0.6)');
+    earthGradient.addColorStop(1, 'rgba(100, 150, 255, 0)');
+
+    ctx.fillStyle = earthGradient;
+    ctx.beginPath();
+    ctx.arc(earthX, earthY, earthRadius * 1.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 地球本体（青と白のマーブル）
+    const earthBodyGradient = ctx.createRadialGradient(
+      earthX - 5, earthY - 5, 0,
+      earthX, earthY, earthRadius
+    );
+    earthBodyGradient.addColorStop(0, '#88CCFF');
+    earthBodyGradient.addColorStop(0.5, '#4488CC');
+    earthBodyGradient.addColorStop(1, '#2255AA');
+
+    ctx.fillStyle = earthBodyGradient;
+    ctx.beginPath();
+    ctx.arc(earthX, earthY, earthRadius, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 地球の雲（白い模様）
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+    ctx.beginPath();
+    ctx.arc(earthX - 5, earthY - 3, 8, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(earthX + 4, earthY + 5, 6, 0, Math.PI * 2);
+    ctx.fill();
   }, [map.width, map.height, cellSize]);
 
   // 月面と拠点を描画
@@ -95,53 +159,68 @@ export default function LunarMapCanvas({
     for (let y = 0; y < map.height; y++) {
       for (let x = 0; x < map.width; x++) {
         const cell = map.cells[y][x];
-        let baseColor = { r: 80, g: 80, b: 80 }; // 月面の基本色（灰色）
+        let baseColor = { r: 50, g: 50, b: 50 }; // 月面の基本色（より暗く）
 
         if (showTerrain) {
-          // 地形の荒さとクレーターを表現
+          // 地形の荒さとクレーターを表現（コントラストを大幅強化）
           const roughness = cell.terrain.roughness;
           const slope = cell.terrain.slope;
 
-          // より月面らしい色合い（グレースケール with slight brownish tint）
-          const brightness = 60 + roughness * 60 - slope * 30;
+          // 月面のコントラストを強化（暗部は非常に暗く、明部は明るく）
+          const baseBrightness = 35 + roughness * 120 - slope * 50;
+          const brightness = Math.max(20, Math.min(180, baseBrightness));
+
           baseColor = {
             r: brightness,
-            g: brightness * 0.95,
-            b: brightness * 0.9,
+            g: brightness * 0.96,
+            b: brightness * 0.92,
           };
+
+          // 太陽の方向からの影を追加
+          const shadowFromSun = Math.cos(sunAngle) * (x / map.width - 0.15) +
+                                Math.sin(sunAngle) * (y / map.height - 0.15);
+
+          if (shadowFromSun > 0.3) {
+            // 太陽光が当たる側は明るく
+            const lightBoost = Math.min(40, shadowFromSun * 60);
+            baseColor.r += lightBoost;
+            baseColor.g += lightBoost * 0.95;
+            baseColor.b += lightBoost * 0.9;
+          } else if (shadowFromSun < -0.1) {
+            // 影の側は暗く
+            const shadowDarken = Math.abs(shadowFromSun) * 0.5;
+            baseColor.r *= (1 - shadowDarken);
+            baseColor.g *= (1 - shadowDarken);
+            baseColor.b *= (1 - shadowDarken);
+          }
+
         } else if (showSolar) {
           // 日照をオレンジ-イエローのヒートマップで
           const solar = cell.solar.visibility;
-          const intensity = solar * 200;
+          const intensity = solar * 220;
           baseColor = {
-            r: 80 + intensity,
-            g: 80 + intensity * 0.8,
-            b: 80 + intensity * 0.3,
+            r: 50 + intensity,
+            g: 50 + intensity * 0.85,
+            b: 50 + intensity * 0.4,
           };
         } else if (showResource) {
           // 資源を青-シアンで表現
           const resource = cell.resource.expectedValue / 100;
-          const intensity = resource * 150;
+          const intensity = resource * 180;
           baseColor = {
-            r: 80 + intensity * 0.3,
-            g: 80 + intensity * 0.7,
-            b: 80 + intensity,
+            r: 50 + intensity * 0.3,
+            g: 50 + intensity * 0.75,
+            b: 50 + intensity,
           };
         }
 
         // 夜間の暗転を適用
-        const finalR = Math.floor(baseColor.r * (1 - nightDarkness));
-        const finalG = Math.floor(baseColor.g * (1 - nightDarkness));
-        const finalB = Math.floor(baseColor.b * (1 - nightDarkness));
+        const finalR = Math.floor(Math.max(0, Math.min(255, baseColor.r * (1 - nightDarkness))));
+        const finalG = Math.floor(Math.max(0, Math.min(255, baseColor.g * (1 - nightDarkness))));
+        const finalB = Math.floor(Math.max(0, Math.min(255, baseColor.b * (1 - nightDarkness))));
 
         ctx.fillStyle = `rgb(${finalR}, ${finalG}, ${finalB})`;
         ctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
-
-        // 微細な影のディテール（月面のザラザラ感）
-        if (Math.random() > 0.95) {
-          ctx.fillStyle = `rgba(0, 0, 0, ${0.1 + Math.random() * 0.2})`;
-          ctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
-        }
       }
     }
 
