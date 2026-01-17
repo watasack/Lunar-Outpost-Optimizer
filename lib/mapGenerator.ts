@@ -24,6 +24,46 @@ function octaveNoise(x: number, y: number, octaves: number, seed: number): numbe
   return value / maxValue;
 }
 
+// クレーター生成
+function generateCraters(width: number, height: number): Array<{x: number, y: number, radius: number, depth: number}> {
+  const craters = [];
+  const craterCount = Math.floor((width * height) / 400); // 密度調整
+
+  for (let i = 0; i < craterCount; i++) {
+    craters.push({
+      x: Math.random() * width,
+      y: Math.random() * height,
+      radius: 2 + Math.random() * 8,
+      depth: 0.3 + Math.random() * 0.7,
+    });
+  }
+
+  return craters;
+}
+
+// クレーター影響を計算
+function getCraterInfluence(x: number, y: number, craters: Array<{x: number, y: number, radius: number, depth: number}>): number {
+  let influence = 0;
+
+  for (const crater of craters) {
+    const dx = x - crater.x;
+    const dy = y - crater.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    if (dist < crater.radius) {
+      // クレーター内部：深さに応じて暗くなる
+      const normalized = dist / crater.radius;
+      influence -= crater.depth * (1 - normalized * normalized);
+    } else if (dist < crater.radius * 1.5) {
+      // クレーターの縁：少し明るくなる（盛り上がり）
+      const normalized = (dist - crater.radius) / (crater.radius * 0.5);
+      influence += 0.2 * (1 - normalized);
+    }
+  }
+
+  return influence;
+}
+
 // 日照計算（時刻と位置による）
 function calculateSolar(x: number, y: number, day: number): {
   currentPower: number;
@@ -56,13 +96,17 @@ function calculateSolar(x: number, y: number, day: number): {
 }
 
 // 地形評価計算
-function calculateTerrain(x: number, y: number): {
+function calculateTerrain(x: number, y: number, craters: Array<{x: number, y: number, radius: number, depth: number}>): {
   buildCost: number;
   roughness: number;
   slope: number;
 } {
-  const roughness = octaveNoise(x / MAP_WIDTH, y / MAP_HEIGHT, 4, 200);
+  const baseRoughness = octaveNoise(x / MAP_WIDTH, y / MAP_HEIGHT, 4, 200);
   const slope = octaveNoise(x / MAP_WIDTH, y / MAP_HEIGHT, 2, 300) * 0.8;
+
+  // クレーター影響を追加
+  const craterInfluence = getCraterInfluence(x, y, craters);
+  const roughness = Math.max(0, Math.min(1, baseRoughness + Math.abs(craterInfluence) * 0.5));
 
   // 建設コスト倍率（1.0 ~ 3.0）
   const buildCost = 1 + roughness * 1.5 + slope * 0.5;
@@ -93,15 +137,23 @@ function calculateResource(x: number, y: number): {
   };
 }
 
+// クレーターを保持（一度だけ生成）
+let cachedCraters: Array<{x: number, y: number, radius: number, depth: number}> | null = null;
+
 // 月面マップ生成
 export function generateLunarMap(day: number = 0): LunarMap {
+  // クレーターは初回のみ生成
+  if (!cachedCraters) {
+    cachedCraters = generateCraters(MAP_WIDTH, MAP_HEIGHT);
+  }
+
   const cells: Cell[][] = [];
 
   for (let y = 0; y < MAP_HEIGHT; y++) {
     const row: Cell[] = [];
     for (let x = 0; x < MAP_WIDTH; x++) {
       const position: Position = { x, y };
-      const terrain = calculateTerrain(x, y);
+      const terrain = calculateTerrain(x, y, cachedCraters);
       const solar = calculateSolar(x, y, day);
       const resource = calculateResource(x, y);
 
